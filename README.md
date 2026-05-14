@@ -1,77 +1,92 @@
-# Stacker - WhatsApp Sticker Manager
+# Stacker for WhatsApp Web
 
-Stacker is a Chrome Extension designed to enhance the sticker experience on WhatsApp Web by providing search, categorization, and filtering capabilities.
+Stacker is a local sticker organization layer for WhatsApp Web that helps users find, organize, preview, and send stickers faster. It is built as a Chrome Extension (Manifest V3) using React, TypeScript, Vite, and Tailwind CSS.
 
-## Architecture (V2)
+## Features
 
-The project has been migrated to a modern tech stack:
-- **React 19**
-- **TypeScript**
-- **Vite 8**
-- **Tailwind CSS 4**
+- **Floating Right-Side Panel**: Access your organized collection anytime.
+- **Folder Management**: Categorize stickers into custom folders with unique colors.
+- **Search & Tagging**: Find the perfect sticker by searching for manual tags or folder names.
+- **'Save to Stacker' Overlay**: Adds a green '＋' button to native WhatsApp stickers for instant saving.
+- **Preview & Direct Send**: View stickers in large format and send them to the active chat with one click.
+- **Privacy First**: All data is stored locally in your browser using `chrome.storage.local`.
 
-### Components
+## Technical Stack
 
-1. **Content Script (`src/content.tsx`)**: 
-   - Uses React to inject a floating UI into WhatsApp Web.
-   - Manages the 'Stacker' button injection and the right-side panel visibility.
-   - Communicates with the Background Service Worker and Inject Script.
+- **Framework**: React 19
+- **Language**: TypeScript
+- **Build Tool**: Vite 8
+- **Styling**: Tailwind CSS 4
+- **Platform**: Chrome Extension Manifest V3
 
-2. **Inject Script (`src/inject.ts`)**:
-   - Injected into the page's execution context.
-   - Interacts with WhatsApp's internal JavaScript modules.
-   - **Exposed Modules:** `Store`, `Msg`, `Sticker`, `StickerPack`, `Cmd`.
+## Local Setup
 
-3. **Background Service Worker (`src/background.ts`)**:
-   - Manages persistent storage using `chrome.storage.local`.
-   - Handles search and metadata management for stickers.
+### Prerequisites
 
-4. **UI Components (`src/components/`)**:
-   - `StackerButton`: Toggle button injected into the WhatsApp Web header.
-   - `StackerPanel`: Floating right-side panel for organization and search.
+- [Node.js](https://nodejs.org/) (v18 or higher)
+- [npm](https://www.npmjs.com/)
 
-## Data Schema
+### Installation
 
-### `stickerMetadata`
-```json
-{
-  "sticker_hash_1": {
-    "tags": ["dog", "funny"],
-    "folders": ["favorites"],
-    "addedAt": 1678901234567
-  }
-}
-```
+1.  Clone the repository:
+    ```bash
+    git clone https://github.com/thaislugoboni/stacker-extension.git
+    cd stacker-extension
+    ```
 
-### `folders`
-```json
-[
-  {
-    "id": "favorites",
-    "name": "Favorites",
-    "color": "#ff0000"
-  }
-]
-```
+2.  Install dependencies:
+    ```bash
+    npm install
+    ```
 
-## Development
+3.  Build the project:
+    ```bash
+    npm run build
+    ```
+    The build artifacts will be generated in the `dist/` directory.
 
-### Setup
-```bash
-npm install
-```
+## How to load the unpacked extension in Chrome
 
-### Build
-```bash
-npm run build
-```
-The build output will be in the `dist/` directory.
+1.  Open Google Chrome.
+2.  Navigate to `chrome://extensions/`.
+3.  Enable **Developer mode** using the toggle in the top-right corner.
+4.  Click the **Load unpacked** button.
+5.  Select the `dist/` folder inside your project directory.
+6.  Navigate to [web.whatsapp.com](https://web.whatsapp.com/).
+7.  Look for the Stacker icon in the side menu header to open the panel.
 
-### Loading in Chrome
-1. Open `chrome://extensions/`.
-2. Enable "Developer mode".
-3. Click "Load unpacked" and select the `stacker/` directory (ensure it contains the `manifest.json` and `dist/` files are correctly referenced if needed, though currently `manifest.json` is in root and points to root of `dist` after build... wait).
+## Known Limitations
 
-Wait, the `manifest.json` in root points to `content.js` but build puts them in `dist/`.
-I should probably move `manifest.json` to `public/` or update it to point to `dist/`.
-Actually, if I put it in `public/`, Vite copies it to `dist/`. That's better.
+- **Browser Specific**: Currently only supports Chrome and Chromium-based browsers (Edge, Brave, etc.).
+- **Local Storage Only**: Folders and tags do not sync across devices as no backend is used for the MVP.
+- **WhatsApp UI Changes**: The extension relies on DOM selectors (e.g., `data-testid`). If WhatsApp updates their interface, selectors may need updating.
+- **Media Types**: Optimized for static and animated stickers. Support for large GIFs or other media types is limited.
+
+## Future Roadmap
+
+- **OCR & Image Recognition**: Automatically tag stickers using AI to make them searchable without manual effort.
+- **Cloud Sync**: Optional encrypted sync for folders across different computers.
+- **Batch Actions**: Select multiple stickers at once to move them to folders or delete them.
+- **Import/Export**: Export your sticker library metadata as a JSON file for backup.
+- **Firefox Support**: Adapt the manifest and storage calls for Firefox/WebExtensions compatibility.
+
+## Technical Deep Dive
+
+### Module Bridge (`src/inject.ts`)
+The extension utilizes a Webpack hook to intercept the WhatsApp Web client's internal modules. This allows for direct interaction with the `Store` and `Msg` objects, enabling:
+-   **Programmatic Sending**: Using the `Cmd` and `Chat` models to send stickers without manual DOM simulation.
+-   **Sticker Metadata Extraction**: Accessing internal `Sticker` models to retrieve high-resolution blob URLs and unique identifiers.
+
+### UI Injection Strategy (`src/content.tsx`)
+We use a high-performance `MutationObserver` with debouncing to monitor DOM changes. This ensures that the Stacker button and the React-based management layer are reliably injected into the obfuscated WhatsApp Web interface without causing UI lag.
+
+### Storage & Search
+Sticker metadata (tags, folder assignments) is persisted via `chrome.storage.local`. The search functionality is optimized by performing keyword filtering on the background script and only requesting necessary assets (like temporary blob URLs) on-demand to minimize memory footprint.
+
+## Performance Optimizations
+-   **Debounced Observers**: DOM mutation checks are limited to 500ms intervals.
+-   **Lazy URL Loading**: Sticker images are only fetched and rendered when they appear in the management panel's viewport.
+-   **Shadow DOM-ready**: Components are styled with high-specificity selectors to prevent style leakage from WhatsApp's global CSS.
+
+## TypeScript Safety
+The project uses strict TypeScript configurations. Key interfaces for WhatsApp's internal structures are maintained in the source to ensure type safety when bridging between the extension context and the page context.

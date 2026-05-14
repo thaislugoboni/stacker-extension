@@ -113,6 +113,7 @@
         }
 
         if (event.data.type === 'TAG_STICKERS_IN_DOM' && Stacker.isReady) {
+            if (!discoveredModules.Store?.Sticker) return;
             const stickerElements = document.querySelectorAll('div[role="button"] img[src^="blob:"]');
             const stickerArray = discoveredModules.Store.Sticker.toArray ? 
                                  discoveredModules.Store.Sticker.toArray() : 

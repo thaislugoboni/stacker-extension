@@ -4,18 +4,26 @@ import StackerButton from './components/StackerButton';
 import StackerPanel from './components/StackerPanel';
 import './index.css';
 
+// WhatsApp-specific selectors that might need updates
+const SELECTORS = {
+  SIDE_HEADER: '[data-testid="side"] header',
+  STICKER_PANEL: '[data-testid="sticker-panel"]',
+  STICKER_IMG: 'img[src^="blob:"]',
+  APP_ROOT: '#app',
+};
+
 const App: React.FC = () => {
   const [isOpen, setIsOpen] = useState(false);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data.type === 'TOGGLE_STACKER' && event.data.source === 'stacker-ui') {
-        setIsOpen(!isOpen);
+        setIsOpen(prev => !prev);
       }
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [isOpen]);
+  }, []);
 
   return (
     <>
@@ -27,18 +35,27 @@ const App: React.FC = () => {
 const injectButton = () => {
   if (document.getElementById('stacker-button-root')) return;
 
-  // Find a suitable place for the button (e.g., side menu header or chat header)
-  // WhatsApp's side menu header
-  const sideHeader = document.querySelector('header');
+  const sideHeader = document.querySelector(SELECTORS.SIDE_HEADER);
   if (sideHeader) {
     const root = document.createElement('div');
     root.id = 'stacker-button-root';
-    sideHeader.appendChild(root);
+    root.style.display = 'flex';
+    root.style.alignItems = 'center';
+    
+    // Inject before the last child (usually the menu/dots)
+    if (sideHeader.lastElementChild) {
+      sideHeader.insertBefore(root, sideHeader.lastElementChild);
+    } else {
+      sideHeader.appendChild(root);
+    }
 
     const reactRoot = ReactDOM.createRoot(root);
     reactRoot.render(
       <React.StrictMode>
-        <StackerButton onClick={() => window.postMessage({ type: 'TOGGLE_STACKER', source: 'stacker-ui' }, '*')} isOpen={false} />
+        <StackerButton 
+          onClick={() => window.postMessage({ type: 'TOGGLE_STACKER', source: 'stacker-ui' }, '*')} 
+          isOpen={false} 
+        />
       </React.StrictMode>
     );
   }
@@ -51,8 +68,8 @@ const injectApp = () => {
   root.id = 'stacker-app-root';
   document.body.appendChild(root);
 
-  // We need to inject Tailwind styles into the shadow DOM if we were using one,
-  // but for now let's try direct injection to body with high z-index.
+  // Note: We are injecting into the main document. 
+  // In a more complex extension, we'd use a Shadow DOM to isolate styles.
   const reactRoot = ReactDOM.createRoot(root);
   reactRoot.render(
     <React.StrictMode>
@@ -61,30 +78,17 @@ const injectApp = () => {
   );
 };
 
-// Start bridge script
-const script = document.createElement('script');
-script.src = chrome.runtime.getURL('inject.js');
-script.onload = function() {
+// Bridge script injection (Manifest V3 compatible)
+const injectBridge = () => {
+  if (document.getElementById('stacker-bridge')) return;
+  const script = document.createElement('script');
+  script.id = 'stacker-bridge';
+  script.src = chrome.runtime.getURL('inject.js');
+  script.onload = function() {
     (this as any).remove();
+  };
+  (document.head || document.documentElement).appendChild(script);
 };
-(document.head || document.documentElement).appendChild(script);
-
-// Initial injection
-setTimeout(() => {
-  injectButton();
-  injectApp();
-}, 2000);
-
-// Observe DOM
-const observer = new MutationObserver(() => {
-  injectButton();
-  injectApp();
-  
-  // Also trigger sticker tagging in the inject script
-  window.postMessage({ type: 'TAG_STICKERS_IN_DOM', source: 'stacker-content' }, '*');
-  injectSaveButtons();
-});
-observer.observe(document.body, { childList: true, subtree: true });
 
 const injectSaveButtons = () => {
   const stickers = document.querySelectorAll('.stacker-tagged-sticker');
@@ -97,30 +101,35 @@ const injectSaveButtons = () => {
     const btn = document.createElement('button');
     btn.className = 'stacker-save-btn';
     btn.innerHTML = '＋';
-    btn.style.position = 'absolute';
-    btn.style.top = '2px';
-    btn.style.right = '2px';
-    btn.style.zIndex = '100';
-    btn.style.backgroundColor = '#25D366';
-    btn.style.color = 'white';
-    btn.style.border = 'none';
-    btn.style.borderRadius = '50%';
-    btn.style.width = '20px';
-    btn.style.height = '20px';
-    btn.style.display = 'flex';
-    btn.style.alignItems = 'center';
-    btn.style.justifyContent = 'center';
-    btn.style.fontSize = '14px';
-    btn.style.fontWeight = 'bold';
-    btn.style.cursor = 'pointer';
-    btn.style.boxShadow = '0 1px 3px rgba(0,0,0,0.3)';
-    btn.title = 'Save to Stacker';
+    Object.assign(btn.style, {
+      position: 'absolute',
+      top: '4px',
+      right: '4px',
+      zIndex: '100',
+      backgroundColor: '#25D366',
+      color: 'white',
+      border: 'none',
+      borderRadius: '50%',
+      width: '22px',
+      height: '22px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontSize: '16px',
+      fontWeight: 'bold',
+      cursor: 'pointer',
+      boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+      transition: 'transform 0.1s ease',
+    });
+
+    btn.onmouseenter = () => btn.style.transform = 'scale(1.1)';
+    btn.onmouseleave = () => btn.style.transform = 'scale(1)';
 
     btn.onclick = (e) => {
       e.stopPropagation();
       e.preventDefault();
       chrome.runtime.sendMessage({ action: 'saveStickerTags', stickerId: id, tags: [] }, (response) => {
-        if (response && response.status === 'success') {
+        if (response?.status === 'success') {
           btn.style.backgroundColor = '#128C7E';
           btn.innerHTML = '✓';
           setTimeout(() => {
@@ -131,7 +140,6 @@ const injectSaveButtons = () => {
       });
     };
 
-    // Ensure parent is relative for absolute positioning
     if (window.getComputedStyle(stickerEl).position === 'static') {
       (stickerEl as HTMLElement).style.position = 'relative';
     }
@@ -140,18 +148,44 @@ const injectSaveButtons = () => {
   });
 };
 
-// Listen for sticker clicks in the WhatsApp UI to allow saving/tagging
+// Optimized DOM observation
+let observerTimeout: ReturnType<typeof setTimeout> | null = null;
+const observer = new MutationObserver(() => {
+  if (observerTimeout) return;
+  
+  observerTimeout = setTimeout(() => {
+    injectButton();
+    injectApp();
+    
+    // Only trigger tagging and button injection if panel is likely open
+    if (document.querySelector(SELECTORS.STICKER_PANEL)) {
+      window.postMessage({ type: 'TAG_STICKERS_IN_DOM', source: 'stacker-content' }, '*');
+      injectSaveButtons();
+    }
+    
+    observerTimeout = null;
+  }, 500); // 500ms debounce for performance
+});
+
+// Initialize
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    injectBridge();
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
+} else {
+  injectBridge();
+  observer.observe(document.body, { childList: true, subtree: true });
+}
+
+// Global context menu listener for quick save
 document.addEventListener('contextmenu', (e: MouseEvent) => {
   const stickerEl = (e.target as HTMLElement).closest('div[role="button"]');
   if (stickerEl && stickerEl.querySelector('img')) {
     const id = stickerEl.getAttribute('data-stacker-id');
     if (id) {
       e.preventDefault();
-      // We could open the panel and search for this sticker or open a quick tag menu
-      console.log('Stacker: Right-clicked sticker', id);
-      // For now, let's just make sure it's saved in metadata if it isn't already
       chrome.runtime.sendMessage({ action: 'saveStickerTags', stickerId: id, tags: [] });
-      // And maybe open the Stacker panel
       window.postMessage({ type: 'TOGGLE_STACKER', source: 'stacker-ui' }, '*');
     }
   }
