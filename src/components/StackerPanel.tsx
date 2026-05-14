@@ -35,7 +35,7 @@ const StackerPanel: React.FC = () => {
   const fetchMetadata = useCallback(() => {
     chrome.storage.local.get(['stickerMetadata'], (result) => {
       if (result.stickerMetadata) {
-        setStickerMetadata(result.stickerMetadata);
+        setStickerMetadata(result.stickerMetadata as Record<string, StickerMeta>);
       }
     });
   }, []);
