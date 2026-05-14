@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import StickerGrid from './StickerGrid';
 import PreviewModal from './PreviewModal';
 import SearchBar from './SearchBar';
@@ -23,14 +23,15 @@ const StackerPanel: React.FC = () => {
   const [stickerUrls, setStickerUrls] = useState<Record<string, string>>({});
   const [stickerMetadata, setStickerMetadata] = useState<Record<string, StickerMeta>>({});
   const [selectedSticker, setSelectedSticker] = useState<{ id: string; url: string } | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const fetchFolders = () => {
+  const fetchFolders = useCallback(() => {
     chrome.runtime.sendMessage({ action: 'getFolders' }, (response) => {
-      if (response && response.folders) {
+      if (response?.folders) {
         setFolders(response.folders);
       }
     });
-  };
+  }, []);
 
   const fetchMetadata = useCallback(() => {
     chrome.storage.local.get(['stickerMetadata'], (result) => {
@@ -40,11 +41,33 @@ const StackerPanel: React.FC = () => {
     });
   }, []);
 
+  const handleSearch = useCallback((query: string) => {
+    setSearchQuery(query);
+    setIsLoading(true);
+    chrome.runtime.sendMessage({ action: 'searchStickers', query }, (response) => {
+      setIsLoading(false);
+      if (response?.results) {
+        setMatchingStickers(response.results);
+        
+        // Request missing URLs from inject script
+        const missingIds = response.results.filter((id: string) => !stickerUrls[id]);
+        if (missingIds.length > 0) {
+          window.postMessage({
+            type: 'GET_STICKERS_URLS',
+            source: 'stacker-content',
+            stickerIds: missingIds,
+            requestId: Math.random().toString(36).substring(7)
+          }, '*');
+        }
+      }
+    });
+  }, [stickerUrls]);
+
   useEffect(() => {
     fetchFolders();
     fetchMetadata();
     handleSearch(''); // Initial search
-  }, [fetchMetadata]);
+  }, [fetchFolders, fetchMetadata, handleSearch]);
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
@@ -65,32 +88,12 @@ const StackerPanel: React.FC = () => {
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
-  const handleSearch = (query: string) => {
-    setSearchQuery(query);
-    chrome.runtime.sendMessage({ action: 'searchStickers', query }, (response) => {
-      if (response && response.results) {
-        setMatchingStickers(response.results);
-        
-        // Request missing URLs from inject script
-        const missingIds = response.results.filter((id: string) => !stickerUrls[id]);
-        if (missingIds.length > 0) {
-          window.postMessage({
-            type: 'GET_STICKERS_URLS',
-            source: 'stacker-content',
-            stickerIds: missingIds,
-            requestId: Math.random().toString(36).substring(7)
-          }, '*');
-        }
-      }
-    });
-  };
-
   const createFolder = () => {
     const name = prompt('Folder name:');
-    if (name) {
-      chrome.runtime.sendMessage({ action: 'createFolder', folderName: name }, (response) => {
-        if (response && response.folder) {
-          setFolders([...folders, response.folder]);
+    if (name?.trim()) {
+      chrome.runtime.sendMessage({ action: 'createFolder', folderName: name.trim() }, (response) => {
+        if (response?.folder) {
+          setFolders(prev => [...prev, response.folder]);
         }
       });
     }
@@ -98,7 +101,7 @@ const StackerPanel: React.FC = () => {
 
   const handleStickerClick = (id: string, url: string) => {
     setSelectedSticker({ id, url });
-    fetchMetadata(); // Refresh metadata when opening preview
+    fetchMetadata(); 
   };
 
   const handleSend = (id: string) => {
@@ -115,7 +118,7 @@ const StackerPanel: React.FC = () => {
     if (!currentTags.includes(tag)) {
       const newTags = [...currentTags, tag];
       chrome.runtime.sendMessage({ action: 'saveStickerTags', stickerId: id, tags: newTags }, (response) => {
-        if (response && response.status === 'success') {
+        if (response?.status === 'success') {
           fetchMetadata();
         }
       });
@@ -124,23 +127,27 @@ const StackerPanel: React.FC = () => {
 
   const handleAddToFolder = (id: string, folderId: string) => {
     const currentFolders = stickerMetadata[id]?.folders || [];
-    if (currentFolders.includes(folderId)) {
-      chrome.runtime.sendMessage({ action: 'removeStickerFromFolder', stickerId: id, folderId }, (response) => {
-        if (response && response.status === 'success') {
-          fetchMetadata();
-        }
-      });
-    } else {
-      chrome.runtime.sendMessage({ action: 'addStickerToFolder', stickerId: id, folderId }, (response) => {
-        if (response && response.status === 'success') {
-          fetchMetadata();
-        }
-      });
-    }
+    const action = currentFolders.includes(folderId) ? 'removeStickerFromFolder' : 'addStickerToFolder';
+    
+    chrome.runtime.sendMessage({ action, stickerId: id, folderId }, (response) => {
+      if (response?.status === 'success') {
+        fetchMetadata();
+      }
+    });
   };
 
+  const panelStyles = useMemo(() => ({
+    width: '320px',
+    backgroundColor: 'white',
+    boxShadow: '-4px 0 16px rgba(0,0,0,0.1)',
+    zIndex: 10000,
+  }), []);
+
   return (
-    <div className="fixed top-0 right-0 h-full w-80 bg-white shadow-2xl z-[1000] flex flex-col border-l border-[#d1d7db] animate-slide-in font-sans">
+    <div 
+      className="fixed top-0 right-0 h-full flex flex-col border-l border-[#d1d7db] animate-slide-in font-sans"
+      style={panelStyles}
+    >
       <div className="p-4 bg-[#00a884] text-white flex items-center justify-between shadow-md">
         <div className="flex items-center gap-2">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
@@ -148,7 +155,11 @@ const StackerPanel: React.FC = () => {
           </svg>
           <h2 className="text-lg font-bold">Stacker</h2>
         </div>
-        <button onClick={() => window.postMessage({ type: 'TOGGLE_STACKER', source: 'stacker-ui' }, '*')} className="hover:bg-white/20 p-1 rounded-full transition-colors">
+        <button 
+          onClick={() => window.postMessage({ type: 'TOGGLE_STACKER', source: 'stacker-ui' }, '*')} 
+          className="hover:bg-white/20 p-1 rounded-full transition-colors"
+          title="Close Panel"
+        >
           <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
             <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z" />
           </svg>
@@ -157,7 +168,7 @@ const StackerPanel: React.FC = () => {
 
       <SearchBar value={searchQuery} onChange={handleSearch} />
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar">
+      <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#f0f2f5]">
         <FolderSidebar 
           folders={folders} 
           currentQuery={searchQuery} 
@@ -165,20 +176,25 @@ const StackerPanel: React.FC = () => {
           onCreateFolder={createFolder}
         />
 
-        <div className="p-4 border-t border-[#d1d7db]">
-          <h3 className="text-xs font-bold text-[#667781] uppercase tracking-wider mb-4">Results</h3>
+        <div className="p-4 border-t border-[#d1d7db] bg-white mt-2 min-h-full">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xs font-bold text-[#667781] uppercase tracking-wider">Results</h3>
+            {isLoading && <div className="w-4 h-4 border-2 border-[#00a884] border-t-transparent rounded-full animate-spin"></div>}
+          </div>
+          
           <StickerGrid 
             stickerIds={matchingStickers} 
             stickerUrls={stickerUrls} 
             onStickerClick={handleStickerClick}
           />
-          {matchingStickers.length === 0 && (
+          
+          {matchingStickers.length === 0 && !isLoading && (
             <div className="flex flex-col items-center justify-center py-12 text-[#667781]">
               <svg viewBox="0 0 24 24" width="48" height="48" fill="currentColor" className="opacity-20 mb-4">
                 <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-1-13h2v6h-2zm0 8h2v2h-2z"/>
               </svg>
               <p className="text-sm font-medium">No stickers found</p>
-              <p className="text-xs mt-1">Try tagging some stickers first!</p>
+              <p className="text-xs mt-1 text-center">Save stickers from WhatsApp by clicking the green ＋ button!</p>
             </div>
           )}
         </div>
@@ -224,9 +240,9 @@ const StackerPanel: React.FC = () => {
           from { transform: scale(0.9); opacity: 0; }
           to { transform: scale(1); opacity: 1; }
         }
-        .animate-slide-in { animation: slide-in 0.3s ease-out; }
+        .animate-slide-in { animation: slide-in 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
         .animate-fade-in { animation: fade-in 0.2s ease-out; }
-        .animate-scale-in { animation: scale-in 0.2s ease-out; }
+        .animate-scale-in { animation: scale-in 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
       `}</style>
     </div>
   );
